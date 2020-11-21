@@ -1,0 +1,9 @@
+The architecture for truly deploying an ML model is this:
+Backend server receives a request from user’s web browser. It’s wrapped up in JSON but semantically would be something like: “Tomorrow is Wednesday and we sold 10 units today. How many customer support calls should we expect tomorrow?”
+Backend pushes the job {Wednesday, 10} into a queue (some place decoupled from the backend itself, such as Redis in the case of MLQ). The queue replies with “Thanks, let’s refer to that as Job ID 562”.
+Backend replies to the user: “I’ll do that calculation. It has ID 562. Please wait”. Backend is then free to serve other users.
+The user’s web browser starts displaying a ‘please wait’ spinner.
+Workers — at least, ones that are not currently processing another job — are constantly polling the queue for jobs. Probably, the workers exist on another server/computer, but they can also be different threads/processes on the same computer. Workers might have GPUs, whereas the backend server probably does not need to.
+Eventually, a worker will pick up the job, removing it from the queue, and process it (e.g. run {Wednesday, 10} through some XGBoost model). It’ll save the prediction to a database. Imagine this step takes 5 minutes.
+Meanwhile, the user’s web browser is polling the backend every 30 seconds to ask if job 562 is done yet. The backend checks if the database has a result stored at id=562 and replies accordingly. Any of our multiple horizontal backends is able to serve the user’s request. You might imagine that the shared database is a single point of failure, and you’d be right! But separately, we provisioned replicas and some failover mechanism, maybe sharding/load balancing, so it’s all good.
+After five minutes plus a bit, the user polls for a result, and we are able to serve it up.
